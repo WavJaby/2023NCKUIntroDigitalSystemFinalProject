@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "rgbquant": "^1.1.2",
+    "sharp": "^0.29.0"
+  }
+}

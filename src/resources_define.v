@@ -1,0 +1,13 @@
+`define imageBitdepth 16
+`define imageW(index) ((`imgWidth>>((index)<<4))&16'hFFFF)
+`define imageH(index) ((`imgHeight>>((index)<<4))&16'hFFFF)
+`define image(index,x,y) [((((`itemStart>>(index)*24)&24'hFFFFFF)+((x)+(y)*`imageW(index)))<<4)+:16]
+// item0(sphere.png): 32x32
+// item1(DVD_logo.png): 64x29
+// item2(brick.png): 64x23
+// item3(shoto.png): 64x64
+`define itemStart 96'h001100000b40000400000000
+`define imgWidth 64'h0040004000400020
+`define imgHeight 64'h00400017001d0020
+`define rom0ItemCount 4
+`define rom0Length 135168
