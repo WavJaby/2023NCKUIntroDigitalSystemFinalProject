@@ -1,0 +1,21 @@
+// struct gameObjs
+`define objXSize 12
+`define objYSize 12
+`define objWSize 12
+`define objHSize 12
+`define objTagSize 4
+`define objColorSize 16
+`define objImgIdSize 4
+`define objImgIdMask 4'b1111
+`define objImgScaleSize 2
+`define objX(index) [(index)*`gameObjsSize+:`objXSize]
+`define objY(index) [(index)*`gameObjsSize+12+:`objYSize]
+`define objW(index) [(index)*`gameObjsSize+24+:`objWSize]
+`define objH(index) [(index)*`gameObjsSize+36+:`objHSize]
+`define objTag(index) [(index)*`gameObjsSize+48+:`objTagSize]
+`define objColor(index) [(index)*`gameObjsSize+52+:`objColorSize]
+`define objImgId(index) [(index)*`gameObjsSize+68+:`objImgIdSize]
+`define objImgScale(index) [(index)*`gameObjsSize+72+:`objImgScaleSize]
+`define gameObjsSize 74
+`define gameObjsMaxLen 50
+`define gameObjsInit reg [3699:0] gameObjs=3700'd0

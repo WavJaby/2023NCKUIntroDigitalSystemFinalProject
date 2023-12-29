@@ -43,26 +43,26 @@ if (require.main === module) (async function () {
     const toWidth = parseInt(process.argv[3]);
     console.log('open: ' + imagePath);
 
-    const gifImage = Sharp(imagePath, { animated: true })
-    const gifInfo = await gifImage.metadata();
-    // console.log(gifInfo);
+    // const gifImage = Sharp(imagePath, { animated: true })
+    // const gifInfo = await gifImage.metadata();
+    // // console.log(gifInfo);
 
-    const gap = Math.max(1, gifInfo.pages / 8);
-    let index = 0;
-    for (let page = 0; page < gifInfo.pages; page += gap) {
-        const pageInt = page | 0;
-        console.log(`page: ${pageInt}`);
-        const offset = gifInfo.pageHeight * pageInt;
-        const frame = gifImage.clone()
-            .extract({ left: 0, top: offset, width: gifInfo.width, height: gifInfo.pageHeight });
-        // console.log(frame);
-        await createImage(frame, index++, toWidth, 'chipi_', false, false, true, false);
-    }
-    console.log(`totalPages: ${index}`);
+    // const gap = Math.max(1, gifInfo.pages / 8);
+    // let index = 0;
+    // for (let page = 0; page < gifInfo.pages; page += gap) {
+    //     const pageInt = page | 0;
+    //     console.log(`page: ${pageInt}`);
+    //     const offset = gifInfo.pageHeight * pageInt;
+    //     const frame = gifImage.clone()
+    //         .extract({ left: 0, top: offset, width: gifInfo.width, height: gifInfo.pageHeight });
+    //     // console.log(frame);
+    //     await createImage(frame, index++, toWidth, 'chipi_', false, false, true, false);
+    // }
+    // console.log(`totalPages: ${index}`);
 
-    // const sharpImg = Sharp(imagePath);
-    // const { imageWidth, imageHeight } = await createImage(sharpImg, -1, toWidth, '.', true, false, true, true);
-    // console.log(imageWidth + 'x' + imageHeight);
+    const sharpImg = Sharp(imagePath);
+    const { imageWidth, imageHeight } = await createImage(sharpImg, -1, toWidth, '.', true, false, true, true);
+    console.log(imageWidth + 'x' + imageHeight);
 })();
 
 async function createImageFromPath(imagePath, toWidth, addPadding, reverce, saveHexFile) {
@@ -77,7 +77,7 @@ async function createImage(sharpImg, page, toWidth, outDir, addPadding, reverce,
         outName += '_' + page;
     fs.mkdirSync(outDir, { recursive: true });
 
-    console.log('resize image');
+    // console.log('resize image');
     // Add extra padding if need 
     if (addPadding) {
         const padding = inImageInfo.width / toWidth / 2 | 0;
@@ -94,12 +94,12 @@ async function createImage(sharpImg, page, toWidth, outDir, addPadding, reverce,
     const data = image.data, imageInfo = image.info;
     const imageWidth = imageInfo.width, imageHeight = imageInfo.height;
 
-    console.log('reduce image');
+    // console.log('reduce image');
     const quant = new RgbQuant(options);
     quant.sample(data, imageWidth);
     const out = quant.reduce(new Uint8Array(data));
 
-    console.log('create hex file');
+    // console.log('create hex file');
     const debugResult = new Uint8Array(data.length);
     const hexResult = [];
     let row = [];

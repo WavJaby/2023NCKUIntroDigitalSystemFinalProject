@@ -1,4 +1,3 @@
-`include "src/define.v"
 `include "src/resources_define.v"
 
 module resource (

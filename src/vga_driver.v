@@ -26,10 +26,7 @@ module vga_driver (
         if (Hcount == HSyncPulse - 1) begin
             H_SYNC <= 1;
         end else if (Hcount == HSyncPulse + HBackPorch - 1) begin
-            if (availableV && rst) begin
-                available <= 1;
-                nextFrame <= 1;
-            end
+            if (availableV && rst) available <= 1;
         end else if (Hcount == HSyncPulse + HBackPorch + HActiveVid - 1) begin
             available <= 0;
         end else if (Hcount == HSyncPulse + HBackPorch + HActiveVid + HFrontPorch - 2) begin
@@ -49,14 +46,13 @@ module vga_driver (
             availableV <= 1;
         end else if (Vcount == VSyncPulse + VBackPorch + VActiveVid - 1) begin
             availableV <= 0;
+            nextFrame  <= 0;
         end else if (Vcount == VSyncPulse + VBackPorch + VActiveVid + VFrontPorch - 1) begin
             Vcount <= 0;
             V_SYNC <= 0;
             if (!rst) frameCount <= 0;
-            else begin
-                frameCount <= frameCount + 1;
-                nextFrame  <= 0;
-            end
+            else frameCount <= frameCount + 1;
+            nextFrame <= 1;
         end
 
         pixY <= Vcount - (VSyncPulse + VBackPorch) + 16'd1;

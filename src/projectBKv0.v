@@ -1,5 +1,5 @@
-`include "vga_driver.v"
-`include "seven_display.v"
+`include "src/vga_driver.v"
+`include "src/seven_display.v"
 
 `define DEBUG
 
@@ -61,7 +61,7 @@ module project (
         sevenDisp5
     );
 
-    wire available;
+    wire available, nextFrame;
     wire [15:0] pixX;
     wire [15:0] pixY;
     vga_driver vga (
@@ -70,6 +70,7 @@ module project (
         H_SYNC,
         V_SYNC,
         available,
+        nextFrame,
         pixX,
         pixY,
         frameCount

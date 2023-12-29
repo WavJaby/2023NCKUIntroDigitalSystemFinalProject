@@ -1,50 +1,61 @@
-`include "src/define.v"
-`include "src/vga_driver.v"
-`include "src/seven_display.v"
-`include "src/resource.v"
-`include "src/resources_define.v"
+`include "./src/vga_driver.v"
+`include "./src/keypad_driver.v"
+`include "./src/seven_display_driver.v"
+
+`include "./src/resource.v"
+`include "./src/resources_define.v"
+`include "./src/struct_define.v"
 
 `define DEBUG
-`define NOCHIPI
+`define NOIMAGE
 
-`define objX 12
-`define objY 12
-`define objW 12
-`define objH 12
-`define objImgId 8
+`define color16R(color) (((color) >> 12) & 4'b1111)
+`define color16G(color) (((color) >> 8) & 4'b1111)
+`define color16B(color) (((color) >> 4) & 4'b1111)
+`define color16A(color) ((color) & 4'b1111)
 
-`define objXStart 0
-`define objYStart (`objXStart+`objX)
-`define objWStart (`objYStart+`objY)
-`define objHStart (`objWStart+`objW)
-`define objImgIdStart (`objHStart+`objH)
-`define objDataLen (`objImgIdStart+`objImgId)
-`define objCount 10
+`define color12R(color) (((color) >> 9) & 4'b0111 << 1)
+`define color12G(color) (((color) >> 6) & 4'b0111 << 1)
+`define color12B(color) (((color) >> 3) & 4'b0111 << 1)
+`define color12A(color) ((color) & 4'b0111 << 1)
 
-`define getObjX(index) [index*`objDataLen+`objXStart +: `objX]
-`define getObjY(index) [index*`objDataLen+`objYStart +: `objY]
-`define getObjW(index) [index*`objDataLen+`objWStart +: `objW]
-`define getObjH(index) [index*`objDataLen+`objHStart +: `objH]
-`define getObjImg(index) [index*`objDataLen+`objImgIdStart +: `objImgId]
+`define imgColBit (`imageBitdepth-1)
+
+`define ScreenWidth 12'd640
+`define ScreenHeight 12'd480
+
+`define nullTag `objTagSize'd0
+`define playerTag `objTagSize'd1
+`define ballTag `objTagSize'd2
+`define brickTag `objTagSize'd3
 
 module project (
     input clk,
     input rst,
     input [3:0] button,
 
-    output reg [3:0] Red,
-    output reg [3:0] Green,
-    output reg [3:0] Blue,
-    output H_SYNC,
-    output V_SYNC,
-    output wire [6:0] sevenDisp0,
-    output wire [6:0] sevenDisp1,
-    output wire [6:0] sevenDisp2,
-    output wire [6:0] sevenDisp3,
-    output wire [6:0] sevenDisp4,
-    output wire [6:0] sevenDisp5
+    input [3:0] keypadCol,
+    output [3:0] keypadRowRequest,
+
+    output reg [9:0] led,
+
+    output reg [3:0] vgaRed,
+    output reg [3:0] vgaGreen,
+    output reg [3:0] vgaBlue,
+    output vgaH_SYNC,
+    output vgaV_SYNC,
+
+    output [6:0] sevenDisp0,
+    output [6:0] sevenDisp1,
+    output [6:0] sevenDisp2,
+    output [6:0] sevenDisp3,
+    output [6:0] sevenDisp4,
+    output [6:0] sevenDisp5
 );
-    `include "src/lib/math.v"
+    `include "src/lib/math.sv"
+    `include "src/lib/collision_check.sv"
+
+    // Vga driver
     wire available;
     wire nextFrame;
     wire [15:0] pixX;
@@ -53,293 +64,264 @@ module project (
     vga_driver vga (
         rst,
         clk,
-        H_SYNC,
-        V_SYNC,
+        vgaH_SYNC,
+        vgaV_SYNC,
         available,
         nextFrame,
         pixX,
         pixY,
         frameCount
     );
+    // keypad
+    wire [3:0] keypadRow0, keypadRow1, keypadRow2, keypadRow3;
+    keypad_driver keypad (
+        clk,
+        rst,
+        keypadCol,
+        keypadRowRequest,
+        keypadRow0,
+        keypadRow1,
+        keypadRow2,
+        keypadRow3
+    );
 
-    parameter ScreenWidth = 16'd640, ScreenHeight = 16'd480;
-
-    reg [`objDataLen*`objCount-1:0] gameObjs;
+    // Resources loader
+`ifndef NOIMAGE
     wire [`rom0Length-1:0] imageData;
     resource res (imageData);
-
-
-    parameter testPtr = 0, ballPtr = 1, p1Ptr = 2, p2Ptr = 3;
-    reg [31:0] p1Speed = 6;
-    reg [31:0] p2Speed = 6;
-
-    reg signed [31:0] ballVelX = 5;
-    reg signed [31:0] ballVelY = 5;
-
-    parameter slabWidth = 12'd8, slabDefaultLen = 12'd80, slabDefaultOffset = 12'd40;
-
-`ifndef NOCHIPI
-    parameter chipiWidth = 16'd64, chipiHeight = 16'd64, chipiTotalBit = chipiWidth*chipiHeight*`imageBitdepth;
-    reg [31:0] chipiPosX = (ScreenWidth >> 1) - chipiWidth;
-    reg [31:0] chipiPosY = (ScreenHeight >> 1) - chipiHeight;
-    reg [chipiWidth*`imageBitdepth-1:0] chipiData0[0:chipiHeight-1];
-    reg [chipiWidth*`imageBitdepth-1:0] chipiData1[0:chipiHeight-1];
-    reg [chipiWidth*`imageBitdepth-1:0] chipiData2[0:chipiHeight-1];
-    reg [chipiWidth*`imageBitdepth-1:0] chipiData3[0:chipiHeight-1];
-    reg [chipiWidth*`imageBitdepth-1:0] chipiData4[0:chipiHeight-1];
-    reg [2:0] chipiFrame = 0;
-    reg chipiDir = 1;
-    reg [31:0] chipiDiv = 0;
-    initial begin
-        $readmemh("resources/chipi/chipi-chipi_0.hex", chipiData0);
-        $readmemh("resources/chipi/chipi-chipi_1.hex", chipiData1);
-        $readmemh("resources/chipi/chipi-chipi_2.hex", chipiData2);
-        $readmemh("resources/chipi/chipi-chipi_3.hex", chipiData3);
-        $readmemh("resources/chipi/chipi-chipi_4.hex", chipiData4);
-    end
 `endif
 
-    integer updateObjI, updateCacheImgI, updateCacheObjX, updateCacheObjY;
-    integer nowX, nowY, newP1Y, newP2Y;
+    // Gameobjects
+    `gameObjsInit;
+
+    parameter ballPtr = 0, p1Ptr = 1, p2Ptr = 2;
+    parameter slabWidth = `objHSize'd8, slabDefaultLen = `objWSize'd80, slabDefaultOffset = `objYSize'd40;
+
+    reg signed [`objXSize-1:0] p1Speed = `objXSize'd4, p2Speed = `objXSize'd4;
+
+    parameter initBallVelY = -`objYSize'd1;
+    reg signed [11:0] ballVelX = `objXSize'd1, ballVelY = initBallVelY;
+    reg unsigned [1:0] ballState = 1;
+
+    reg signed [11:0] nowX = `objXSize'd0, nowY = `objYSize'd0, newP1X = `objXSize'd0, newP2X = `objXSize'd0;
+    integer updateObjI, updateCacheI, updateCacheJ, updateCacheK;
     always @(posedge nextFrame) begin : frame
         // Init
-        if (frameCount==0) begin
-            gameObjs`getObjX(5) <= 0;
-            gameObjs`getObjY(5) <= 0;
-            gameObjs`getObjW(5) <= 32;
-            gameObjs`getObjH(5) <= 32;
-            gameObjs`getObjImg(5) <= 1;
+        if (frameCount == 0) begin
+            updateCacheK = 5;
+            for (updateCacheI = 0; updateCacheI < 4; updateCacheI = updateCacheI + 1) begin
+                for (updateCacheJ = 0; updateCacheJ < 8; updateCacheJ = updateCacheJ + 1) begin
+                    gameObjs`objX(updateCacheK) <= `objXSize'd96 + `objXSize'd56 * updateCacheJ;
+                    gameObjs`objY(updateCacheK) <= `objXSize'd64 + `objXSize'd32 * updateCacheI;
+                    gameObjs`objW(updateCacheK) <= `imageW(1);
+                    gameObjs`objH(updateCacheK) <= `imageH(1);
+                    gameObjs`objTag(updateCacheK) <= `brickTag;
+                    gameObjs`objImgId(updateCacheK) <= 1;
+                    gameObjs`objColor(updateCacheK) <= `objColorSize'hFFFF;
+                    updateCacheK = updateCacheK + 1;
+                end
+            end
 
-            gameObjs`getObjX(testPtr) <= 0;
-            gameObjs`getObjY(testPtr) <= 32;
-            gameObjs`getObjW(testPtr) <= 64;
-            gameObjs`getObjH(testPtr) <= 29;
-            gameObjs`getObjImg(testPtr) <= 2;
+            ballState = 1;
+            gameObjs`objX(ballPtr) <= 0;
+            gameObjs`objY(ballPtr) <= 0;
+            gameObjs`objW(ballPtr) <= `imageW(0);
+            gameObjs`objH(ballPtr) <= `imageW(0);
+            gameObjs`objTag(ballPtr) <= `ballTag;
+            gameObjs`objImgId(ballPtr) <= 0;
+            gameObjs`objColor(ballPtr) <= `objColorSize'hFFFF;
 
-            gameObjs`getObjX(4) <= 0;
-            gameObjs`getObjY(4) <= 32+29;
-            gameObjs`getObjW(4) <= 64;
-            gameObjs`getObjH(4) <= 23;
-            gameObjs`getObjImg(4) <= 3;
+            gameObjs`objX(p1Ptr) <= `ScreenWidth / `objXSize'd4 - slabDefaultLen / `objXSize'd2;
+            gameObjs`objY(p1Ptr) <= `ScreenHeight - slabDefaultOffset;
+            gameObjs`objW(p1Ptr) <= slabDefaultLen;
+            gameObjs`objH(p1Ptr) <= slabWidth;
+            gameObjs`objTag(p1Ptr) <= `playerTag;
+            gameObjs`objImgId(p1Ptr) <= `objImgIdMask;
+            gameObjs`objColor(p1Ptr) <= `objColorSize'hFAFF;
 
-            gameObjs`getObjX(6) <= 0;
-            gameObjs`getObjY(6) <= 32+29+23;
-            gameObjs`getObjW(6) <= 128;
-            gameObjs`getObjH(6) <= 128;
-            gameObjs`getObjImg(6) <= 4;
-
-            gameObjs`getObjX(ballPtr) <= 0;
-            gameObjs`getObjY(ballPtr) <= 0;
-            gameObjs`getObjW(ballPtr) <= 32;
-            gameObjs`getObjH(ballPtr) <= 32;
-            gameObjs`getObjImg(ballPtr) <= 1;
-
-            gameObjs`getObjX(p1Ptr) <= slabDefaultOffset;
-            gameObjs`getObjY(p1Ptr) <= ScreenHeight / 2 - slabDefaultLen / 2;
-            gameObjs`getObjW(p1Ptr) <= slabWidth;
-            gameObjs`getObjH(p1Ptr) <= slabDefaultLen;
-            gameObjs`getObjImg(p1Ptr) = 0;
-
-            gameObjs`getObjX(p2Ptr) <= ScreenWidth - slabWidth - slabDefaultOffset;
-            gameObjs`getObjY(p2Ptr) <= ScreenHeight / 2 - slabDefaultLen / 2;
-            gameObjs`getObjW(p2Ptr) <= slabWidth;
-            gameObjs`getObjH(p2Ptr) <= slabDefaultLen;
-            gameObjs`getObjImg(p2Ptr) <= 0;
+            gameObjs`objX(p2Ptr) <= `ScreenWidth / `objXSize'd4 * `objXSize'd3 - slabDefaultLen / `objXSize'd2;
+            gameObjs`objY(p2Ptr) <= `ScreenHeight - slabDefaultOffset;
+            gameObjs`objW(p2Ptr) <= slabDefaultLen;
+            gameObjs`objH(p2Ptr) <= slabWidth;
+            gameObjs`objTag(p2Ptr) <= `playerTag;
+            gameObjs`objImgId(p2Ptr) <= `objImgIdMask;
+            gameObjs`objColor(p2Ptr) <= `objColorSize'hAFFF;
 
             disable frame;
         end
 
         // Player control
-        newP1Y = gameObjs`getObjY(p1Ptr);
-        if (!button[2]) begin
-            newP1Y = gameObjs`getObjY(p1Ptr) - p1Speed;
-            if (newP1Y < 0) newP1Y = 0;
-            gameObjs`getObjY(p1Ptr) <= newP1Y;
-        end else if (!button[3]) begin
-            newP1Y = gameObjs`getObjY(p1Ptr) + p1Speed;
-            if (newP1Y + gameObjs`getObjH(p1Ptr) > ScreenHeight) 
-                newP1Y = ScreenHeight - gameObjs`getObjH(p1Ptr);
-            gameObjs`getObjY(p1Ptr) <= newP1Y;
+        newP1X = gameObjs`objX(p1Ptr);
+        if (keypadRow0[3]) begin
+            newP1X = gameObjs`objX(p1Ptr) - p1Speed;
+            if (newP1X < 0) newP1X = 0;
+            gameObjs`objX(p1Ptr) <= newP1X;
+        end else if (keypadRow0[2]) begin
+            newP1X = gameObjs`objX(p1Ptr) + p1Speed;
+            if (newP1X + gameObjs`objW(p1Ptr) >= `ScreenWidth) 
+                newP1X = `ScreenWidth - gameObjs`objW(p1Ptr);
+            gameObjs`objX(p1Ptr) <= newP1X;
         end
-        newP2Y = gameObjs`getObjY(p2Ptr);
-        if (!button[0]) begin
-            newP2Y = gameObjs`getObjY(p2Ptr) - p2Speed;
-            if (newP2Y < 0) newP2Y = 0;
-            gameObjs`getObjY(p2Ptr) <= newP2Y;
-        end else if (!button[1]) begin
-            newP2Y = gameObjs`getObjY(p2Ptr) + p2Speed;
-            if (newP2Y + gameObjs`getObjH(p2Ptr) > ScreenHeight) 
-                newP2Y = ScreenHeight - gameObjs`getObjH(p2Ptr);
-            gameObjs`getObjY(p2Ptr) <= newP2Y;
+        newP2X = gameObjs`objX(p2Ptr);
+        if (keypadRow0[1]) begin
+            newP2X = gameObjs`objX(p2Ptr) - p2Speed;
+            if (newP2X < 0) newP2X = 0;
+            gameObjs`objX(p2Ptr) <= newP2X;
+        end else if (keypadRow0[0]) begin
+            newP2X = gameObjs`objX(p2Ptr) + p2Speed;
+            if (newP2X + gameObjs`objW(p2Ptr) >= `ScreenWidth) 
+                newP2X = `ScreenWidth - gameObjs`objW(p2Ptr);
+            gameObjs`objX(p2Ptr) <= newP2X;
         end
 
         // Ball control
-        nowX = (gameObjs`getObjX(ballPtr)) + ballVelX;
-        nowY = (gameObjs`getObjY(ballPtr)) + ballVelY;
-        gameObjs`getObjX(ballPtr) <= nowX;
-        gameObjs`getObjY(ballPtr) <= nowY;
-        if (nowX < 0) begin
-            ballVelX <= 0 - ballVelX;
-            gameObjs`getObjX(ballPtr) <= `objX'd0;
-        end
-        if (nowX + gameObjs`getObjW(ballPtr) > ScreenWidth) begin
-            ballVelX <= 0 - ballVelX;
-            gameObjs`getObjX(ballPtr) <= ScreenWidth - gameObjs`getObjW(ballPtr);
-        end
-        if (nowY < 0) begin
-            ballVelY <= 0 - ballVelY;
-            gameObjs`getObjY(ballPtr) <= `objY'd0;
-        end
-        if (nowY + gameObjs`getObjH(ballPtr) > ScreenHeight) begin
-            ballVelY <= 0 - ballVelY;
-            gameObjs`getObjY(ballPtr) <= ScreenHeight - gameObjs`getObjH(ballPtr);
-        end
+        case(ballState)
+            2'd0: begin
+                nowX = (gameObjs`objX(ballPtr)) + ballVelX;
+                nowY = (gameObjs`objY(ballPtr)) + ballVelY;
+                gameObjs`objX(ballPtr) <= nowX;
+                gameObjs`objY(ballPtr) <= nowY;
+                if (nowX < 0) begin
+                    ballVelX <= `objXSize'd0 - ballVelX;
+                    gameObjs`objX(ballPtr) <= `objXSize'd0;
+                end else if (nowX + gameObjs`objW(ballPtr) >= `ScreenWidth) begin
+                    ballVelX <= `objXSize'd0 - ballVelX;
+                    gameObjs`objX(ballPtr) <= `ScreenWidth - gameObjs`objW(ballPtr);
+                end
+                if (nowY < 0) begin
+                    ballVelY <= `objYSize'd0 - ballVelY;
+                    gameObjs`objY(ballPtr) <= `objYSize'd0;
+                end else if (nowY + gameObjs`objH(ballPtr) >= `ScreenHeight) begin
+                    ballVelY <= `objYSize'd0 - ballVelY;
+                    gameObjs`objY(ballPtr) <= `ScreenHeight - gameObjs`objH(ballPtr);
+                end
+            end
+            2'd1: begin
+                gameObjs`objX(ballPtr) <= newP1X + (gameObjs`objW(p1Ptr)>>1) - (gameObjs`objW(ballPtr)>>1);
+                gameObjs`objY(ballPtr) <= gameObjs`objY(p1Ptr) - gameObjs`objH(ballPtr) - `objYSize'd5;
+                if (keypadRow1[3]) begin
+                    ballState <= 0;
+                    ballVelY <= initBallVelY;
+                end
+            end
+        endcase
 
         // Ball collition
-        for (updateObjI = 0; updateObjI < `objCount; updateObjI = updateObjI + 1) begin
-            if (updateObjI != ballPtr && intersectSphereBox(
-                nowX+(gameObjs`getObjW(ballPtr)>>1), nowY+(gameObjs`getObjH(ballPtr)>>1), gameObjs`getObjW(ballPtr)>>1,
-                gameObjs`getObjX(updateObjI), gameObjs`getObjY(updateObjI), 
-                gameObjs`getObjW(updateObjI), gameObjs`getObjH(updateObjI))) begin
+        updateCacheJ = 1;
+        for (updateObjI = 0; updateObjI < `gameObjsMaxLen && updateCacheJ; updateObjI = updateObjI + 1) begin : collition
+            // Continue if ball or null
+            if (gameObjs`objTag(updateObjI) == `ballTag || gameObjs`objTag(updateObjI) == `nullTag)
+                disable collition;
+
+            updateCacheI = intersectSphereBox(
+                nowX+(gameObjs`objW(ballPtr)>>1), nowY+(gameObjs`objH(ballPtr)>>1), gameObjs`objW(ballPtr)>>1,
+                gameObjs`objX(updateObjI), gameObjs`objY(updateObjI), 
+                gameObjs`objW(updateObjI), gameObjs`objH(updateObjI));
+            // Brack brick
+            if (updateCacheI > 0 && gameObjs`objTag(updateObjI) == `brickTag) begin
+                gameObjs`objTag(updateObjI) <= `nullTag;
+            end
+            // Physics
+            if (updateCacheI & 2'b10) begin
+                gameObjs`objX(ballPtr) <= (ballVelX > 0)
+                    ? gameObjs`objX(updateObjI) - gameObjs`objW(ballPtr) 
+                    : gameObjs`objX(updateObjI) + gameObjs`objW(updateObjI);
                 ballVelX <= 0 - ballVelX;
-                gameObjs`getObjX(ballPtr) <= (ballVelX > 0)
-                    ? gameObjs`getObjX(updateObjI) - gameObjs`getObjW(ballPtr) 
-                    : gameObjs`getObjX(updateObjI);
+                updateCacheJ = 0;
+            end
+            if (updateCacheI & 2'b01) begin
+                gameObjs`objY(ballPtr) <= (ballVelY > 0)
+                    ? gameObjs`objY(updateObjI) - gameObjs`objH(ballPtr) 
+                    : gameObjs`objY(updateObjI) + gameObjs`objH(updateObjI);
+                ballVelY <= 0 - ballVelY;
+                updateCacheJ = 0;
             end
         end
-
-`ifndef NOCHIPI
-        chipiDiv <= chipiDiv + 1;
-        if (chipiDiv == 6) begin
-            chipiDiv <= 0;
-            if (chipiDir) chipiFrame = chipiFrame + 1;
-            else chipiFrame = chipiFrame - 1;
-            if (chipiFrame == 0) chipiDir <= 1;
-            else if (chipiFrame == 4) chipiDir <= 0;
-        end
-`endif
     end
 
-    reg [3:0] redCache = 4'd0;
-    reg [3:0] greenCache = 4'd0;
-    reg [3:0] blueCache = 4'd0;
-    reg pixDraw = 1'd0;
-    reg [`imageBitdepth-1:0] pixColor = `imageBitdepth'd0;
-    integer renderObjI;
+    reg unsigned [3:0] redCache = 4'd0,  greenCache = 4'd0, blueCache = 4'd0;
+    reg unsigned [`imageBitdepth-1:0] pixColor = `imageBitdepth'd0, pixColorB = `imageBitdepth'd0;
+    reg unsigned [`objImgIdSize-1:0] renderCacheImgI = `objImgIdSize'd0;
+    integer renderObjI, renderCacheObjX, renderCacheObjY;
     always @(pixX or pixY) begin : screen
         if (!available) begin
-            Red   <= 4'd0;
-            Green <= 4'd0;
-            Blue  <= 4'd0;
+            vgaRed   <= 4'd0;
+            vgaGreen <= 4'd0;
+            vgaBlue  <= 4'd0;
             disable screen;
         end
-        pixDraw = 1'd0;
-        redCache = 4'd0;
-        greenCache = 4'd0;
-        blueCache = 4'd0;
-
-`ifndef NOCHIPI
-        if ((pixX >= chipiPosX) && (pixX < chipiPosX+(chipiWidth<<1)) && 
-            (pixY >= chipiPosY) && (pixY < chipiPosY+(chipiHeight<<1))) begin
-                case (chipiFrame)
-                    0: pixColor = chipiData0[(pixY-chipiPosY) >> 1] >> ((chipiWidth-(((pixX-chipiPosX) >> 1)+1))*`imageBitdepth);
-                    1: pixColor = chipiData1[(pixY-chipiPosY) >> 1] >> ((chipiWidth-(((pixX-chipiPosX) >> 1)+1))*`imageBitdepth);
-                    2: pixColor = chipiData2[(pixY-chipiPosY) >> 1] >> ((chipiWidth-(((pixX-chipiPosX) >> 1)+1))*`imageBitdepth);
-                    3: pixColor = chipiData3[(pixY-chipiPosY) >> 1] >> ((chipiWidth-(((pixX-chipiPosX) >> 1)+1))*`imageBitdepth);
-                    4: pixColor = chipiData4[(pixY-chipiPosY) >> 1] >> ((chipiWidth-(((pixX-chipiPosX) >> 1)+1))*`imageBitdepth);
-                endcase
-            if (pixColor) begin
-                redCache = (((pixColor >> 12 & 4'b1111) * (pixColor & 4'b1111)) >> 4);
-                greenCache = (((pixColor >> 8 & 4'b1111) * (pixColor & 4'b1111)) >> 4);
-                blueCache = (((pixColor >> 4 & 4'b1111) * (pixColor & 4'b1111)) >> 4);
-                pixDraw = 1;
-            end
-        end
-`endif
 
         // Render game objects
-        for (renderObjI = 0; renderObjI < `objCount; renderObjI = renderObjI + 1) begin
-            updateCacheObjX = gameObjs`getObjX(renderObjI);
-            updateCacheObjY = gameObjs`getObjY(renderObjI);
-            if ((pixX >= updateCacheObjX) && (pixX < updateCacheObjX + gameObjs`getObjW(renderObjI)) && 
-                (pixY >= updateCacheObjY) && (pixY < updateCacheObjY + gameObjs`getObjH(renderObjI))) begin
-                updateCacheImgI = gameObjs`getObjImg(renderObjI);
+        redCache = 0;
+        greenCache = 0;
+        blueCache = 0;
+        for (renderObjI = 0; renderObjI < `gameObjsMaxLen; renderObjI = renderObjI + 1) begin
+            renderCacheObjX = gameObjs`objX(renderObjI);
+            renderCacheObjY = gameObjs`objY(renderObjI);
+            if (gameObjs`objTag(renderObjI) != `nullTag &&
+                (pixX >= renderCacheObjX) && (pixX < renderCacheObjX + gameObjs`objW(renderObjI)) && 
+                (pixY >= renderCacheObjY) && (pixY < renderCacheObjY + gameObjs`objH(renderObjI))) begin
+                renderCacheImgI = gameObjs`objImgId(renderObjI);
                 // If image id not 0, render image
-                if (updateCacheImgI) begin
-                    updateCacheImgI = updateCacheImgI - 1;
+                if (renderCacheImgI != `objImgIdMask) begin
+`ifndef NOIMAGE
                     // Render image
-                    if ((pixX >= updateCacheObjX) && (pixX < updateCacheObjX + `imageW(updateCacheImgI)) && 
-                        (pixY >= updateCacheObjY) && (pixY < updateCacheObjY + `imageH(updateCacheImgI))) begin
-                        pixColor = imageData`image(updateCacheImgI, pixX-updateCacheObjX, pixY-updateCacheObjY);
-                        if (pixColor) begin
-                            redCache = (((pixColor >> 12 & 4'b1111) * (pixColor & 4'b1111)) >> 4);
-                            greenCache = (((pixColor >> 8 & 4'b1111) * (pixColor & 4'b1111)) >> 4);
-                            blueCache = (((pixColor >> 4 & 4'b1111) * (pixColor & 4'b1111)) >> 4);
-                            pixDraw = 1;
-                        end
+                    if ((pixX >= renderCacheObjX) && (pixX < renderCacheObjX + `imageW(renderCacheImgI)) && 
+                        (pixY >= renderCacheObjY) && (pixY < renderCacheObjY + `imageH(renderCacheImgI))) begin
+                        pixColor = imageData`image(renderCacheImgI, pixX-renderCacheObjX, pixY-renderCacheObjY);
+                        pixColorB = gameObjs`objColor(renderObjI);
+                        pixColor[0+:4] = `color16A(pixColor)+(`color16A(pixColorB)*(`imgColBit-`color16A(pixColor))/`imgColBit);
+                        // pixColor[12+:4]= ({16'b0,`color16R(pixColor)}*`color16A(pixColor)+`color16R(pixColorB)*`color16A(pixColorB)*(`imgColBit-`color16A(pixColor))/`imgColBit)/pixColor[0+:4];
+                        // pixColor[8+:4] = ({16'b0,`color16G(pixColor)}*`color16A(pixColor)+`color16G(pixColorB)*`color16A(pixColorB)*(`imgColBit-`color16A(pixColor))/`imgColBit)/pixColor[0+:4];
+                        // pixColor[4+:4] = ({16'b0,`color16B(pixColor)}*`color16A(pixColor)+`color16B(pixColorB)*`color16A(pixColorB)*(`imgColBit-`color16A(pixColor))/`imgColBit)/pixColor[0+:4];
+                        
+                        // redCache    = (`color16R(pixColor)*`color16A(pixColor)+`color16A(pixColorB)*`color16A(pixColorB)*(`imgColBit-`color16A(pixColor))/`imgColBit)/pixColor[0+:4];
+                        // greenCache  = (`color16G(pixColor)*`color16A(pixColor)+`color16A(pixColorB)*`color16A(pixColorB)*(`imgColBit-`color16A(pixColor))/`imgColBit)/pixColor[0+:4];
+                        // blueCache   = (`color16B(pixColor)*`color16A(pixColor)+`color16A(pixColorB)*`color16A(pixColorB)*(`imgColBit-`color16A(pixColor))/`imgColBit)/pixColor[0+:4];
+                        
+                        redCache    = (`color16R(pixColor)*pixColor[0+:4]) >> 4;
+                        greenCache  = (`color16G(pixColor)*pixColor[0+:4]) >> 4;
+                        blueCache   = (`color16B(pixColor)*pixColor[0+:4]) >> 4;
                     end
+`else
+                    // Show only border for NOIMAGE mode
+                    if ((pixX == renderCacheObjX) || (pixX + 16'd1 == renderCacheObjX + `imageW(renderCacheImgI)) || 
+                        (pixY == renderCacheObjY) || (pixY + 16'd1 == renderCacheObjY + `imageH(renderCacheImgI))) begin
+                        pixColor = gameObjs`objColor(renderObjI);
+                        redCache    = (`color16R(pixColor) * `color16A(pixColor)) >> 4;
+                        greenCache  = (`color16G(pixColor) * `color16A(pixColor)) >> 4;
+                        blueCache   = (`color16B(pixColor) * `color16A(pixColor)) >> 4;
+                    end
+`endif
                 end else begin
                     // Render color
-                    redCache = 4'b1111;
-                    greenCache = 4'b1111;
-                    blueCache = 4'b1111;
-                    pixDraw = 1;
+                    pixColor = gameObjs`objColor(renderObjI);
+                    redCache    = (`color16R(pixColor) * `color16A(pixColor)) >> 4;
+                    greenCache  = (`color16G(pixColor) * `color16A(pixColor)) >> 4;
+                    blueCache   = (`color16B(pixColor) * `color16A(pixColor)) >> 4;
                 end
             end
         end
 
 `ifdef DEBUG
-        if (!pixDraw) begin
-            if ((pixX == 0 && pixY == 0) || (pixX == 639 && pixY == 479)) begin
-                redCache   = 4'b1111;
-                greenCache = 4'b1111;
-                blueCache  = 4'b1111;
-            end else if (pixX == 0 || pixX == 639) begin
-                redCache   = 4'b1111;
-                greenCache = 4'b0000;
-                blueCache  = 4'b0000;
-            end else if (pixY == 0 || pixY == 479) begin
-                redCache   = 4'b0000;
-                greenCache = 4'b1111;
-                blueCache  = 4'b0000;
-            end
+        if ((pixX == 0 && pixY == 0) || (pixX == 639 && pixY == 479)) begin
+            redCache   = 4'b1111;
+            greenCache = 4'b1111;
+            blueCache  = 4'b1111;
+        end else if (pixX == 0 || pixX == 639) begin
+            redCache   = 4'b1111;
+            greenCache = 4'b0000;
+            blueCache  = 4'b0000;
+        end else if (pixY == 0 || pixY == 479) begin
+            redCache   = 4'b0000;
+            greenCache = 4'b1111;
+            blueCache  = 4'b0000;
         end
 `endif
-        Red   <= redCache;
-        Green <= greenCache;
-        Blue  <= blueCache;
+        vgaRed   <= redCache;
+        vgaGreen <= greenCache;
+        vgaBlue  <= blueCache;
     end
-
-    function pointInBox;
-        input [31:0] pointX;
-        input [31:0] pointY;
-        input [31:0] boxX;
-        input [31:0] boxY;
-        input [31:0] boxW;
-        input [31:0] boxH;
-        pointInBox = (pointX >= boxX && pointX <= boxX + boxW && pointY >= boxY && pointY <= boxY + boxH);
-    endfunction
-
-    function intersectSphereBox;
-        input [31:0] sphereX;
-        input [31:0] sphereY;
-        input [31:0] sphereR;
-        input [31:0] boxX;
-        input [31:0] boxY;
-        input [31:0] boxW;
-        input [31:0] boxH;
-        integer x, y, distance;
-
-        begin
-            // get box closest point to sphere center by clamping
-            x = max(boxX, min(sphereX, boxX + boxW));
-            y = max(boxY, min(sphereY, boxY + boxH));
-            // this is the same as isPointInsideSphere
-            distance = ((x - sphereX) * (x - sphereX) + (y - sphereY) * (y - sphereY));
-            intersectSphereBox = distance < sphereR * sphereR;
-        end
-    endfunction
-
 `ifdef DEBUG
     six_digit_seven_display sevenDisp(
         frameCount,
