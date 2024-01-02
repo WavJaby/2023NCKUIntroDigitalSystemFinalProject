@@ -3,16 +3,17 @@
 `include "./src/seven_display_driver.v"
 
 `include "./src/dot_display.v"
+`include "./src/random.v"
 
 `include "./src/resource.v"
 `include "./src/resources_define.v"
 `include "./src/struct_define.v"
 
-`define DEBUG
-`define NOIMAGE
-// `define NOFONT
+// `define DEBUG
+// `define NOIMAGE
+`define NOFONT
 
-`define charAt(index) [index << 3 +: 8]
+`define charAt(index, len) [(len - index - 1) << 3 +: 8]
 
 `define color16R(color) (((color) >> 12) & 4'b1111)
 `define color16G(color) (((color) >> 8) & 4'b1111)
@@ -95,11 +96,11 @@ module project (
         keypadRow3
     );
     // Dot Display
-    reg [1:0] lightState;
+    reg [1:0] skillState;
     dot_display dotDisplay(
         clk,
         rst,
-        lightState,
+        skillState,
         matrixRow,
         matrixCol0,
         matrixCol1
@@ -110,46 +111,58 @@ module project (
     wire [`rom0Length-1:0] imageData;
     resource res (imageData, fontData);
 
+    // Random
+    wire [`randomLen-1:0] randomData;
+    random rand(clk, randomData);
+
     // Gameobjects
     `gameObjsInit;
 
-    parameter ballPtr = 0, ball2Ptr = 1, p1Ptr = 2, p2Ptr = 3, skillPtr = 4;
+    parameter ballPtr = 0, ball2Ptr = 1, skillPtr = 2, p1Ptr = 3, p2Ptr = 4;
 
-    reg [8*13 - 1:0] gameTitle;
-
+    // Text
+    parameter gameTitleLen = 6;
+    reg [8*gameTitleLen - 1:0] gameTitle;
 
     // Player
     parameter slabWidth = `objHSize'd8, slabDefaultLen = `objWSize'd80, slabDefaultOffset = `objYSize'd40, slabDefaultSpeed = `objXSize'd4;
     reg signed [`objXSize-1:0] p1Speed = slabDefaultSpeed, p2Speed = slabDefaultSpeed;
     reg signed [11:0] newP1X = `objXSize'd0, newP2X = `objXSize'd0;
+    reg unsigned [15:0] life, score;
 
     // Ball
     parameter initBallVel = -`objYSize'd5;
-    reg unsigned [1:0] ballState = 1;
     reg signed [11:0] ballVelX = `objXSize'd0, ballVelY = `objXSize'd0;
     reg signed [11:0] ballNewX = `objXSize'd0, ballNewY = `objYSize'd0;
+    reg unsigned [1:0] ballState = 1;
+    reg unsigned [1:0] ballCollitionCache = 0;
+    reg collitionFind = 0;
 
     // Text
-    reg unsigned [15:0] textScale = 16'd2;
-    reg unsigned [15:0] textX = 16'd0, textY = 16'd5;
+    reg unsigned [15:0] textScale = 16'd3;
+    reg unsigned [15:0] textY = 16'd5;
 
     // Skill box
-    reg signed [11:0] skillBoxX = 12'd0, skillBoxY = 12'd0, skillBoxVelY = 12'd3;
+    reg signed [11:0] skillBoxVelY = 12'd3;
 
-
-    // Game Update
-    integer updateObjI, updateCacheI, updateCacheJ, updateCacheK;
-    always @(posedge nextFrame) begin : frame
+    reg unsigned [3:0] gameStage = 4'd0;
+    reg unsigned [11:0] updateCacheI, updateCacheJ, updateCacheK;
+    // Game Update loop
+    integer updateObjI, updateTextI;
+    always @(posedge nextFrame) begin : frameUpdate
         // Init
         if (frameCount == 0) begin
-            gameTitle = "Brick Breaker";
+            gameTitle <= "BRICK!";
 
-            textX = (`ScreenWidth - ((`fontCharMaxWidth + 1) << textScale) * 3) >> 1;
+            gameStage <= 1;
+            life <= 3;
+            score <= 0;
 
-            p1Speed = slabDefaultSpeed;
-            p2Speed = slabDefaultSpeed;
+            skillState <= 0;
+            p1Speed <= slabDefaultSpeed;
+            p2Speed <= slabDefaultSpeed;
 
-            updateCacheK = 5;
+            updateCacheK = 12'd5;
             for (updateCacheI = 0; updateCacheI < 4; updateCacheI = updateCacheI + 1) begin
                 for (updateCacheJ = 0; updateCacheJ < 8; updateCacheJ = updateCacheJ + 1) begin
                     gameObjs`objX(updateCacheK) <= `objXSize'd96 + `objXSize'd56 * updateCacheJ;
@@ -160,13 +173,13 @@ module project (
                     gameObjs`objImgId(updateCacheK) <= 1;
                     gameObjs`objColor(updateCacheK) <= `objColorSize'hFFFF;
                     gameObjs`objImgScale(updateCacheK) <= 1;
-                    updateCacheK = updateCacheK + 1;
+                    updateCacheK = updateCacheK + 12'd1;
                 end
             end
 
-            ballState = 1;
-            ballVelX = `objXSize'd0;
-            ballVelY = `objXSize'd0;
+            ballState <= 1;
+            ballVelX <= `objXSize'd0;
+            ballVelY <= `objXSize'd0;
             gameObjs`objTag(ballPtr) <= `ballTag;
             gameObjs`objX(ballPtr) <= 0;
             gameObjs`objY(ballPtr) <= 0;
@@ -204,10 +217,20 @@ module project (
             gameObjs`objY(skillPtr) <= 0;
             gameObjs`objW(skillPtr) <= 16;
             gameObjs`objH(skillPtr) <= 16;
-            gameObjs`objColor(skillPtr) <= `objColorSize'hFFFF;
+            gameObjs`objColor(skillPtr) <= `objColorSize'hFF5F;
             gameObjs`objImgId(skillPtr) <= `objImgIdMask;
 
-            disable frame;
+            disable frameUpdate;
+        end
+
+        // Game over
+        if (gameStage == 4'd2) begin
+            disable frameUpdate;
+        end
+
+        if (gameStage == 4'd1 && life == 0) begin
+            gameStage <= 4'd2;
+            disable frameUpdate;
         end
 
         // Player control
@@ -235,74 +258,110 @@ module project (
         end
 
         // Ball control
-        case(ballState)
-            2'd0: begin
-                ballNewX = (gameObjs`objX(ballPtr)) + ballVelX;
-                ballNewY = (gameObjs`objY(ballPtr)) + ballVelY;
-                gameObjs`objX(ballPtr) <= ballNewX;
-                gameObjs`objY(ballPtr) <= ballNewY;
-                if (ballNewX < 0) begin
-                    ballVelX <= `objXSize'd0 - ballVelX;
-                    gameObjs`objX(ballPtr) <= `objXSize'd0;
-                end else if (ballNewX + gameObjs`objW(ballPtr) >= `ScreenWidth) begin
-                    ballVelX <= `objXSize'd0 - ballVelX;
-                    gameObjs`objX(ballPtr) <= `ScreenWidth - gameObjs`objW(ballPtr);
-                end
-                if (ballNewY < 0) begin
-                    ballVelY <= `objYSize'd0 - ballVelY;
-                    gameObjs`objY(ballPtr) <= `objYSize'd0;
-                end else if (ballNewY + gameObjs`objH(ballPtr) >= `ScreenHeight) begin
-                    ballVelY <= `objYSize'd0 - ballVelY;
-                    gameObjs`objY(ballPtr) <= `ScreenHeight - gameObjs`objH(ballPtr);
-                end
+        if (ballState == 2'd0) begin
+            ballNewX = (gameObjs`objX(ballPtr)) + ballVelX;
+            ballNewY = (gameObjs`objY(ballPtr)) + ballVelY;
+        end else begin
+            ballNewX = newP1X + (gameObjs`objW(p1Ptr)>>1) - (gameObjs`objW(ballPtr)>>1);
+            ballNewY = gameObjs`objY(p1Ptr) - gameObjs`objH(ballPtr) - `objYSize'd5;
+            if (keypadRow1[3]) begin
+                ballState <= 0;
+                ballVelX <= initBallVel;
+                ballVelY <= initBallVel;
             end
-            2'd1: begin
-                gameObjs`objX(ballPtr) <= newP1X + (gameObjs`objW(p1Ptr)>>1) - (gameObjs`objW(ballPtr)>>1);
-                gameObjs`objY(ballPtr) <= gameObjs`objY(p1Ptr) - gameObjs`objH(ballPtr) - `objYSize'd5;
-                if (keypadRow1[3]) begin
-                    ballState <= 0;
-                    ballVelX <= initBallVel;
-                    ballVelY <= initBallVel;
-                end
-            end
-        endcase
-
+        end
+        gameObjs`objX(ballPtr) <= ballNewX;
+        gameObjs`objY(ballPtr) <= ballNewY;
+        
         // Ball collition
-        updateCacheJ = 1;
-        for (updateObjI = 0; updateObjI < `gameObjsMaxLen && updateCacheJ; updateObjI = updateObjI + 1) begin : collition
-            // Continue if ball or null
-            if (gameObjs`objTag(updateObjI) == `ballTag || gameObjs`objTag(updateObjI) == `nullTag)
-                disable collition;
+        if (ballNewX < 0) begin
+            // Left wall
+            ballVelX <= `objXSize'd0 - ballVelX;
+            gameObjs`objX(ballPtr) <= `objXSize'd0;
+        end else if (ballNewX + gameObjs`objW(ballPtr) >= `ScreenWidth) begin
+            // Right wall
+            ballVelX <= `objXSize'd0 - ballVelX;
+            gameObjs`objX(ballPtr) <= `ScreenWidth - gameObjs`objW(ballPtr);
+        end else if (ballNewY < 0) begin
+            // Top wall
+            ballVelY <= `objYSize'd0 - ballVelY;
+            gameObjs`objY(ballPtr) <= `objYSize'd0;
+        end else if (ballNewY + gameObjs`objH(ballPtr) >= `ScreenHeight) begin
+            // Bottom wall
+            ballState <= 1;
+            life <= life - 16'd1;
+        end else begin
+            // Check collition with objects
+            collitionFind = 0;
+            for (updateObjI = 3; updateObjI < `gameObjsMaxLen && !collitionFind; updateObjI = updateObjI + 1) begin : ballCollition
+                // Continue if ball or null
+                if (gameObjs`objTag(updateObjI) == `ballTag ||
+                    gameObjs`objTag(updateObjI) == `skillTag ||
+                    gameObjs`objTag(updateObjI) == `nullTag)
+                    disable ballCollition;
 
-            updateCacheI = intersectSphereBox(
-                ballNewX+(gameObjs`objW(ballPtr)>>1), ballNewY+(gameObjs`objH(ballPtr)>>1), gameObjs`objW(ballPtr)>>1,
-                gameObjs`objX(updateObjI), gameObjs`objY(updateObjI), 
-                gameObjs`objW(updateObjI), gameObjs`objH(updateObjI));
-            // Brack brick
-            if (updateCacheI > 0 && gameObjs`objTag(updateObjI) == `brickTag) begin
-                gameObjs`objTag(updateObjI) <= `nullTag;
-            end
-            // Physics
-            if (updateCacheI & 2'b10) begin
-                gameObjs`objX(ballPtr) <= (ballVelX > 0)
-                    ? gameObjs`objX(updateObjI) - gameObjs`objW(ballPtr) 
-                    : gameObjs`objX(updateObjI) + gameObjs`objW(updateObjI);
-                ballVelX <= 0 - ballVelX;
-                updateCacheJ = 0;
-            end
-            if (updateCacheI & 2'b01) begin
-                gameObjs`objY(ballPtr) <= (ballVelY > 0)
-                    ? gameObjs`objY(updateObjI) - gameObjs`objH(ballPtr) 
-                    : gameObjs`objY(updateObjI) + gameObjs`objH(updateObjI);
-                ballVelY <= 0 - ballVelY;
-                updateCacheJ = 0;
+                ballCollitionCache = intersectSphereBox(
+                    ballNewX+(gameObjs`objW(ballPtr)>>1), ballNewY+(gameObjs`objH(ballPtr)>>1), gameObjs`objW(ballPtr)>>1,
+                    gameObjs`objX(updateObjI), gameObjs`objY(updateObjI), 
+                    gameObjs`objW(updateObjI), gameObjs`objH(updateObjI));
+                // Brack brick
+                if (ballCollitionCache && gameObjs`objTag(updateObjI) == `brickTag) begin
+                    gameObjs`objTag(updateObjI) <= `nullTag;
+                    if ((randomData & 1'b1) && gameObjs`objTag(skillPtr) == `nullTag) begin
+                        // Spawn skill block
+                        gameObjs`objX(skillPtr) <= gameObjs`objX(updateObjI);
+                        gameObjs`objY(skillPtr) <= gameObjs`objY(updateObjI);
+                        gameObjs`objTag(skillPtr) <= `skillTag;
+                    end
+                    score <= score + 16'd99;
+                end
+                // Physics
+                if (ballCollitionCache & 2'b10) begin
+                    gameObjs`objX(ballPtr) <= (ballVelX > 0)
+                        ? gameObjs`objX(updateObjI) - gameObjs`objW(ballPtr) 
+                        : gameObjs`objX(updateObjI) + gameObjs`objW(updateObjI);
+                    ballVelX <= 12'd0 - ballVelX;
+                    collitionFind = 1;
+                end
+                if (ballCollitionCache & 2'b01) begin
+                    gameObjs`objY(ballPtr) <= (ballVelY > 0)
+                        ? gameObjs`objY(updateObjI) - gameObjs`objH(ballPtr) 
+                        : gameObjs`objY(updateObjI) + gameObjs`objH(updateObjI);
+                    ballVelY <= 12'd0 - ballVelY;
+                    collitionFind = 1;
+                end
             end
         end
 
-        if (frameCount % 60 == 0)
-            lightState <= lightState + 1;
+        // Skill box control
+        if (gameObjs`objTag(skillPtr) != `nullTag) begin
+            if (intersectBoxBox(newP1X,gameObjs`objY(p1Ptr),gameObjs`objW(p1Ptr),gameObjs`objH(p1Ptr),
+                gameObjs`objX(skillPtr),gameObjs`objY(skillPtr),gameObjs`objW(skillPtr),gameObjs`objH(skillPtr)) || 
+                intersectBoxBox(newP2X,gameObjs`objY(p2Ptr),gameObjs`objW(p2Ptr),gameObjs`objH(p2Ptr),
+                gameObjs`objX(skillPtr),gameObjs`objY(skillPtr),gameObjs`objW(skillPtr),gameObjs`objH(skillPtr))
+            ) begin
+                gameObjs`objTag(skillPtr) <= `nullTag;
+                skillState <= skillState | (2'd1 << (randomData & 2'b1));
+            end else if (gameObjs`objY(skillPtr) > `ScreenHeight) begin
+                // Out of screen bottom
+                gameObjs`objTag(skillPtr) <= `nullTag;
+            end else
+                gameObjs`objY(skillPtr) <= gameObjs`objY(skillPtr) + skillBoxVelY;
+        end
+
+        // Skill
+        if (skillState & 2'b10 && keypadRow1[1]) begin
+            skillState <= skillState & ~2'b10;
+            p1Speed <= p1Speed + `objXSize'd2;
+            p2Speed <= p2Speed + `objXSize'd2;
+        end else if (skillState & 2'b01 && keypadRow1[0]) begin
+            skillState <= skillState & ~2'b01;
+            gameObjs`objW(p1Ptr) <= gameObjs`objW(p1Ptr) + `objWSize'd5;
+            gameObjs`objW(p2Ptr) <= gameObjs`objW(p2Ptr) + `objWSize'd5;
+        end
     end
 
+    // Render loop
     reg unsigned [3:0] alphaCache = 4'd0;
     reg unsigned [`imageBitdepth-1:0] pixColor = `imageBitdepth'd0, pixColorB = `imageBitdepth'd0;
     reg unsigned [15:0] renderCacheImgI = 16'd0, renderCacheImgS = 16'd0, renderCacheFontIndex = 16'b0;
@@ -366,26 +425,21 @@ module project (
         // Second
         renderCacheImgI = frameCount / 60;
 
-        renderCacheTextOffX = textX;
-        renderCacheFontIndex = `fontDigitOff(renderCacheImgI/100%10);
-        if ((pixX >= renderCacheTextOffX) && (pixX < renderCacheTextOffX + (`fontCharW(renderCacheFontIndex) << textScale)) && 
-            (pixY >= textY) && (pixY < textY + (`fontCharHeight << textScale)) &&
-            fontData`fontChar(renderCacheFontIndex, (pixX-renderCacheTextOffX)>>textScale, (pixY-textY)>>textScale))
-            pixColor = 16'b1111111111111111;
-
-        renderCacheTextOffX = textX + ((`fontCharW(renderCacheFontIndex) + 1) << textScale);
-        renderCacheFontIndex = `fontDigitOff(renderCacheImgI/10%10);
-        if ((pixX >= renderCacheTextOffX) && (pixX < renderCacheTextOffX + (`fontCharW(renderCacheFontIndex) << textScale)) && 
-            (pixY >= textY) && (pixY < textY + (`fontCharHeight << textScale)) &&
-            fontData`fontChar(renderCacheFontIndex, (pixX-renderCacheTextOffX)>>textScale, (pixY-textY)>>textScale))
-            pixColor = 16'b1111111111111111;
-
-        renderCacheTextOffX = textX + ((`fontCharW(renderCacheFontIndex) + 1) << textScale << 1);
-        renderCacheFontIndex = `fontDigitOff(renderCacheImgI%10);
-        if ((pixX >= renderCacheTextOffX) && (pixX < renderCacheTextOffX + (`fontCharW(renderCacheFontIndex) << textScale)) && 
-            (pixY >= textY) && (pixY < textY + (`fontCharHeight << textScale)) &&
-            fontData`fontChar(renderCacheFontIndex, (pixX-renderCacheTextOffX)>>textScale, (pixY-textY)>>textScale))
-            pixColor = 16'b1111111111111111;
+        // Display game title
+        renderCacheTextOffX = (`ScreenWidth - ((`fontCharMaxWidth + 1) * textScale) * gameTitleLen) >> 1;
+        updateTextI = 0;
+        // for (updateTextI = 0; updateTextI < 2; updateTextI = updateTextI + 1) begin : displayText
+            // if (gameTitle`charAt(updateTextI, gameTitleLen) == " ")
+            //     disable displayText;
+            renderCacheFontIndex = gameTitle`charAt(updateTextI, gameTitleLen) == "!" 
+                ? `fontOff_33
+                : `fontLetterOff(gameTitle`charAt(updateTextI, gameTitleLen));
+            if ((pixX >= renderCacheTextOffX) && (pixX < renderCacheTextOffX + (7 * textScale)) && 
+                (pixY >= textY) && (pixY < textY + (`fontCharHeight * textScale)) &&
+                fontData`fontChar(renderCacheFontIndex, (pixX-renderCacheTextOffX)/textScale, (pixY-textY)/textScale))
+                pixColor = 16'b1111111111111111;
+        //     renderCacheTextOffX = renderCacheTextOffX + (`fontCharMaxWidth + 1) * updateTextI;
+        // end
         
 `endif
 
@@ -399,6 +453,9 @@ module project (
                 pixColor = 16'b0000111100001111;
             end
         end
+`else
+        if (pixX == 0 || pixX == 639 || pixY == 0 || pixY == 479)
+            pixColor = 16'b1111111111111111;
 `endif
 
         vgaRed   <= (`color16R(pixColor) * `color16A(pixColor)) >> 4;
@@ -406,9 +463,8 @@ module project (
         vgaBlue  <= (`color16B(pixColor) * `color16A(pixColor)) >> 4;
     end
 
-`ifdef DEBUG
     six_digit_seven_display sevenDisp(
-        frameCount,
+        score,
         sevenDisp0,
         sevenDisp1,
         sevenDisp2,
@@ -416,5 +472,4 @@ module project (
         sevenDisp4,
         sevenDisp5
     );
-`endif
 endmodule

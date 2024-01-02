@@ -8,6 +8,7 @@ const imageBitdepth = 16;
 const resources = [
     { path: 'sphere.png', toWidth: 16, padding: true },
     { path: 'brick.png', toWidth: 16 },
+    // { path: 'heart.png', toWidth: 7 },
     // { path: 'DVD_logo.png', toWidth: 32 },
     // { path: 'shoto.png', toWidth: 32 },
 ];
@@ -17,13 +18,13 @@ const structs = [
         array: true,
         maxLen: 5 + 32,
         propties: [
-            { name: 'objTag', size: 4 },
+            { name: 'objTag', size: 3 },
             { name: 'objX', size: 12 },
             { name: 'objY', size: 12 },
             { name: 'objW', size: 10 },
             { name: 'objH', size: 10 },
             { name: 'objColor', size: 16 },
-            { name: 'objImgId', size: 4, mask: true },
+            { name: 'objImgId', size: 3, mask: true },
             { name: 'objImgScale', size: 2 }
         ]
     }
@@ -34,13 +35,23 @@ const fontFile = {
     // fontPath: 'fonts/mini-pixel-7.regular.ttf',
     // characterHeight: 12,
 };
+const randomSettings = {
+    randomLen: 8,
+};
 
 (async function () {
     // Struct define setup
     createStructDefine();
 
+
+    const defineLines = [];
     // Rom define setup
-    await createRom(0);
+    await createRom(0, defineLines);
+    await createFontRom(defineLines);
+    createRandom(defineLines);
+
+    // Save define file
+    fs.writeFileSync(resourcesDefineFile, defineLines.join('\n'));
 })();
 
 function createStructDefine() {
@@ -74,13 +85,11 @@ function createStructDefine() {
     fs.writeFileSync(structDefineFile, defineLines.join('\n'));
 }
 
-async function createRom(romIndex) {
+async function createRom(romIndex, defineLines) {
     let itemIndex = 0;
     let itemOffset = [0];
     let romData = [];
     let romDataSizeBit = 0;
-
-    const defineLines = [];
 
     // Image res
     defineLines.push(`\`define imageBitdepth ${imageBitdepth}`);
@@ -119,9 +128,9 @@ async function createRom(romIndex) {
 
     fs.writeFileSync(`${romDataOutputFile}${romIndex}.hex`, romData.join(''));
     console.log(`Save ${romDataOutputFile}${romIndex}.hex: ${romDataSizeBit} bits\n`);
+}
 
-
-    // Font
+async function createFontRom(defineLines) {
     const cacheFolder = 'cache';
     const fontOutFile = 'font'
     if (!fs.existsSync(cacheFolder))
@@ -141,7 +150,6 @@ async function createRom(romIndex) {
     itemOffset = [];
     itemIndex = 0;
     for (const character of characterOffsets) {
-        let char = character.char;
         let charCode = character.char.charCodeAt(0);
         if (charCode >= 48 && charCode <= 57)
             digitStart.push(itemIndex);
@@ -150,7 +158,7 @@ async function createRom(romIndex) {
             charCode >= 97 && charCode <= 122)
             letterStart.push(itemIndex);
         else
-            defineLines.push(`\`define fontOff_${charCode} ${itemIndex}`);
+            defineLines.push(`\`define fontOff_${charCode} ${itemIndex} // ${character.char}`);
         charWidth.push(character.width);
         itemOffset.push(character.offset);
         itemIndex++;
@@ -158,10 +166,10 @@ async function createRom(romIndex) {
     digitStart.reverse();
     defineLines.push(`\`define fontDigitStart ${digitStart.length << 3}'h` + digitStart.map(i => i.toString(16).padStart(2, '0')).join(''));
     defineLines.push('`define fontDigitOff(digit) ((`fontDigitStart>>((digit)<<3))&8\'hFF)');
-    
+
     letterStart.reverse();
     defineLines.push(`\`define fontLetterStart ${letterStart.length << 3}'h` + letterStart.map(i => i.toString(16).padStart(2, '0')).join(''));
-    defineLines.push('`define fontLetterOff(letter) ((`fontDigitStart>>((letter)<<3))&8\'hFF)');
+    defineLines.push('`define fontLetterOff(letter) (letter>"Z"?((`fontLetterStart>>((letter-71)<<3))&8\'hFF):((`fontLetterStart>>((letter-"A")<<3))&8\'hFF))');
 
     itemOffset.reverse();
     defineLines.push(`\`define fontCharStart ${itemOffset.length * 20}'h` + itemOffset.map(i => i.toString(16).padStart(5, '0')).join(''));
@@ -175,9 +183,17 @@ async function createRom(romIndex) {
     hexResult.reverse();
     fs.writeFileSync(`${fontOutFile}.hex`, hexResult.join(''));
     console.log(`Save ${fontOutFile}.hex: ${fontDataSizeBit} bits\n`);
+}
 
-    // Save define file
-    fs.writeFileSync(resourcesDefineFile, defineLines.join('\n'));
+function createRandom(defineLines) {
+    defineLines.push(`\`define randomLen ${randomSettings.randomLen}`);
+
+    const randomList = [];
+    for (let i = 0; i < randomSettings.randomLen / 4; i++)
+        randomList.push(((Math.random() * 4) | 0).toString(16));
+
+    defineLines.push(`\`define randomList ${randomList.length * 4}'h${randomList.join('')}`);
+    defineLines.push('');
 }
 
 function firstUpper(str) {

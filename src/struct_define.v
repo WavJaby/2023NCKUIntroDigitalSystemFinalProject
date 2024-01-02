@@ -1,21 +1,21 @@
 // struct gameObjs
-`define objTagSize 4
+`define objTagSize 3
 `define objXSize 12
 `define objYSize 12
 `define objWSize 10
 `define objHSize 10
 `define objColorSize 16
-`define objImgIdSize 4
-`define objImgIdMask 4'b1111
+`define objImgIdSize 3
+`define objImgIdMask 3'b111
 `define objImgScaleSize 2
 `define objTag(index) [(index)*`gameObjsSize+:`objTagSize]
-`define objX(index) [(index)*`gameObjsSize+4+:`objXSize]
-`define objY(index) [(index)*`gameObjsSize+16+:`objYSize]
-`define objW(index) [(index)*`gameObjsSize+28+:`objWSize]
-`define objH(index) [(index)*`gameObjsSize+38+:`objHSize]
-`define objColor(index) [(index)*`gameObjsSize+48+:`objColorSize]
-`define objImgId(index) [(index)*`gameObjsSize+64+:`objImgIdSize]
-`define objImgScale(index) [(index)*`gameObjsSize+68+:`objImgScaleSize]
-`define gameObjsSize 70
+`define objX(index) [(index)*`gameObjsSize+3+:`objXSize]
+`define objY(index) [(index)*`gameObjsSize+15+:`objYSize]
+`define objW(index) [(index)*`gameObjsSize+27+:`objWSize]
+`define objH(index) [(index)*`gameObjsSize+37+:`objHSize]
+`define objColor(index) [(index)*`gameObjsSize+47+:`objColorSize]
+`define objImgId(index) [(index)*`gameObjsSize+63+:`objImgIdSize]
+`define objImgScale(index) [(index)*`gameObjsSize+66+:`objImgScaleSize]
+`define gameObjsSize 68
 `define gameObjsMaxLen 37
-`define gameObjsInit reg [2589:0] gameObjs=2590'd0
+`define gameObjsInit reg [2515:0] gameObjs=2516'd0
