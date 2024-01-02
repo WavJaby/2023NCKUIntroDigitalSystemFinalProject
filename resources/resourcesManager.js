@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { createImage, createImageFromPath } = require('./imageProcess.js');
+const { extractFont, createImageFromPath } = require('./imageProcess.js');
 
 const structDefineFile = '../src/struct_define.v';
 const romDataOutputFile = 'rom';
@@ -15,19 +15,25 @@ const structs = [
     {
         name: 'gameObjs',
         array: true,
-        maxLen: 50,
+        maxLen: 5 + 32,
         propties: [
+            { name: 'objTag', size: 4 },
             { name: 'objX', size: 12 },
             { name: 'objY', size: 12 },
-            { name: 'objW', size: 12 },
-            { name: 'objH', size: 12 },
-            { name: 'objTag', size: 4 },
+            { name: 'objW', size: 10 },
+            { name: 'objH', size: 10 },
             { name: 'objColor', size: 16 },
             { name: 'objImgId', size: 4, mask: true },
             { name: 'objImgScale', size: 2 }
         ]
     }
 ];
+const fontFile = {
+    fontPath: 'fonts/PublicPixel.ttf',
+    characterHeight: 7,
+    // fontPath: 'fonts/mini-pixel-7.regular.ttf',
+    // characterHeight: 12,
+};
 
 (async function () {
     // Struct define setup
@@ -75,12 +81,13 @@ async function createRom(romIndex) {
     let romDataSizeBit = 0;
 
     const defineLines = [];
+
+    // Image res
     defineLines.push(`\`define imageBitdepth ${imageBitdepth}`);
     defineLines.push('`define imageW(index) ((`imgWidth>>((index)<<4))&16\'hFFFF)');
     defineLines.push('`define imageH(index) ((`imgHeight>>((index)<<4))&16\'hFFFF)');
-
     defineLines.push('`define image(index,x,y) ' +
-        `[((((\`itemStart>>(index)*24)&24'hFFFFFF)+((x)+(y)*\`imageW(index)))<<4)+:${imageBitdepth}]`);
+        `[((((\`itemStart>>((index)*20))&20'hFFFFF)+((x)+(y)*\`imageW(index)))<<4)+:${imageBitdepth}]`);
 
     let imgWidth = [], imgHeight = [];
     for (const resource of resources) {
@@ -100,7 +107,7 @@ async function createRom(romIndex) {
         itemIndex++;
     }
     itemOffset.reverse();
-    defineLines.push(`\`define itemStart ${itemOffset.length * 24}'h` + itemOffset.map(i => i.toString(16).padStart(6, '0')).join(''));
+    defineLines.push(`\`define itemStart ${itemOffset.length * 20}'h` + itemOffset.map(i => i.toString(16).padStart(5, '0')).join(''));
     imgWidth.reverse();
     defineLines.push(`\`define imgWidth ${imgWidth.length << 4}'h` + imgWidth.map(i => i.toString(16).padStart(4, '0')).join(''));
     imgHeight.reverse();
@@ -108,11 +115,69 @@ async function createRom(romIndex) {
 
     defineLines.push(`\`define ${romDataOutputFile}${romIndex}ItemCount ${itemIndex}`);
     defineLines.push(`\`define ${romDataOutputFile}${romIndex}Length ${romDataSizeBit}`);
-    fs.writeFileSync(resourcesDefineFile, defineLines.join('\n'));
+    defineLines.push('');
 
-    console.log(`Save ${romDataOutputFile}${romIndex}.hex: ${romDataSizeBit} bits`);
     fs.writeFileSync(`${romDataOutputFile}${romIndex}.hex`, romData.join(''));
+    console.log(`Save ${romDataOutputFile}${romIndex}.hex: ${romDataSizeBit} bits\n`);
 
+
+    // Font
+    const cacheFolder = 'cache';
+    const fontOutFile = 'font'
+    if (!fs.existsSync(cacheFolder))
+        fs.mkdirSync(cacheFolder, true);
+
+    let fontDataSizeBit = 0;
+    const { hexResult, characterOffsets, charMaxWidth } =
+        await extractFont(fontFile.fontPath, cacheFolder, fontFile.characterHeight);
+
+    fontDataSizeBit = hexResult.reduce((a, b) => a + b.length, 0);
+    defineLines.push(`\`define ${fontOutFile}Length ${fontDataSizeBit}`);
+    defineLines.push(`\`define ${fontOutFile}CharHeight ${fontFile.characterHeight}`);
+    defineLines.push(`\`define ${fontOutFile}CharMaxWidth ${charMaxWidth}`);
+    const dataWidth = hexResult.length > 0 ? hexResult[0].length : 0;
+    const charWidth = [];
+    const digitStart = [], letterStart = [];
+    itemOffset = [];
+    itemIndex = 0;
+    for (const character of characterOffsets) {
+        let char = character.char;
+        let charCode = character.char.charCodeAt(0);
+        if (charCode >= 48 && charCode <= 57)
+            digitStart.push(itemIndex);
+        else if (
+            charCode >= 65 && charCode <= 90 ||
+            charCode >= 97 && charCode <= 122)
+            letterStart.push(itemIndex);
+        else
+            defineLines.push(`\`define fontOff_${charCode} ${itemIndex}`);
+        charWidth.push(character.width);
+        itemOffset.push(character.offset);
+        itemIndex++;
+    }
+    digitStart.reverse();
+    defineLines.push(`\`define fontDigitStart ${digitStart.length << 3}'h` + digitStart.map(i => i.toString(16).padStart(2, '0')).join(''));
+    defineLines.push('`define fontDigitOff(digit) ((`fontDigitStart>>((digit)<<3))&8\'hFF)');
+    
+    letterStart.reverse();
+    defineLines.push(`\`define fontLetterStart ${letterStart.length << 3}'h` + letterStart.map(i => i.toString(16).padStart(2, '0')).join(''));
+    defineLines.push('`define fontLetterOff(letter) ((`fontDigitStart>>((letter)<<3))&8\'hFF)');
+
+    itemOffset.reverse();
+    defineLines.push(`\`define fontCharStart ${itemOffset.length * 20}'h` + itemOffset.map(i => i.toString(16).padStart(5, '0')).join(''));
+    defineLines.push(`\`define fontChar(index,x,y) [(y)*${dataWidth}+(x)+((\`fontCharStart>>((index)*20))&20'hFFFFF)+:1]`);
+
+    charWidth.reverse();
+    defineLines.push(`\`define fontCharWidth ${charWidth.length << 4}'h` + charWidth.map(i => i.toString(16).padStart(4, '0')).join(''));
+    defineLines.push('`define fontCharW(index) ((`fontCharWidth>>((index)<<4))&16\'hFFFF)');
+
+    defineLines.push('');
+    hexResult.reverse();
+    fs.writeFileSync(`${fontOutFile}.hex`, hexResult.join(''));
+    console.log(`Save ${fontOutFile}.hex: ${fontDataSizeBit} bits\n`);
+
+    // Save define file
+    fs.writeFileSync(resourcesDefineFile, defineLines.join('\n'));
 }
 
 function firstUpper(str) {

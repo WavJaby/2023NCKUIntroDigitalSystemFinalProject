@@ -4,3 +4,4 @@ db/
 simulation/
 node_modules/
 cache/
+*cache*.*

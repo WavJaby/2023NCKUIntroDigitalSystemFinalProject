@@ -29,3 +29,19 @@ function [1:0] intersectSphereBox;
         else intersectSphereBox = 0;
     end
 endfunction
+
+function intersectBoxBox;
+    input [31:0] aBoxX;
+    input [31:0] aBoxY;
+    input [31:0] aBoxW;
+    input [31:0] aBoxH;
+    input [31:0] bBoxX;
+    input [31:0] bBoxY;
+    input [31:0] bBoxW;
+    input [31:0] bBoxH;
+    intersectBoxBox = 
+        aBoxX <= bBoxX + bBoxW &&
+        aBoxX + aBoxW >= bBoxX &&
+        aBoxY <= bBoxY + bBoxH &&
+        aBoxY + aBoxH >= bBoxY;
+endfunction

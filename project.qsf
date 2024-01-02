@@ -61,7 +61,7 @@ set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"
 set_global_assignment -name POWER_BOARD_THERMAL_MODEL "NONE (CONSERVATIVE)"
 set_global_assignment -name OPTIMIZATION_MODE BALANCED
-set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT NORMAL
+set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT FAST
 set_global_assignment -name IO_PLACEMENT_OPTIMIZATION OFF
 set_global_assignment -name ENABLE_BENEFICIAL_SKEW_OPTIMIZATION OFF
 set_global_assignment -name OPTIMIZE_FOR_METASTABILITY OFF
