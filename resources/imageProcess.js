@@ -2,6 +2,8 @@ const fs = require('fs');
 const Sharp = require('sharp');
 const Path = require('path');
 const RgbQuant = require('rgbquant');
+const Fontkit = require('fontkit');
+const { joinImages: JoinImages } = require('join-images');
 
 // Create palette
 const palette = new Array(4096);
@@ -41,7 +43,7 @@ module.exports = {
 if (require.main === module) (async function () {
     const imagePath = process.argv[2];
     const toWidth = parseInt(process.argv[3]);
-    console.log('open: ' + imagePath);
+    // console.log('open: ' + imagePath);
 
     // const gifImage = Sharp(imagePath, { animated: true })
     // const gifInfo = await gifImage.metadata();
@@ -60,10 +62,103 @@ if (require.main === module) (async function () {
     // }
     // console.log(`totalPages: ${index}`);
 
-    const sharpImg = Sharp(imagePath);
-    const { imageWidth, imageHeight } = await createImage(sharpImg, -1, toWidth, '.', true, false, true, true);
-    console.log(imageWidth + 'x' + imageHeight);
+    // const sharpImg = Sharp(imagePath);
+    // const { imageWidth, imageHeight } = await createImage(sharpImg, -1, toWidth, '.', true, false, true, true);
+    // console.log(imageWidth + 'x' + imageHeight);
+
+    const fontPath = imagePath;
+    const cacheFolder = 'cache';
+    if (!fs.existsSync(cacheFolder))
+        fs.mkdirSync(cacheFolder, true);
+    // const toWordHeight = 1272/8;
+
+    const processScale = 3;
+    const toWordHeight = 7;
+
+
+    const font = Fontkit.openSync(fontPath);
+    console.log(`Use font: ${font.fullName}`);
+    console.log(`  family: ${font.familyName}`);
+    const fontName = font.familyName;
+    const bound = { minX: null, maxX: null, maxY: null, minY: null, width: 0, height: 0 };
+    const inputText = [];
+    for (let i = 33; i < 127; i++) {
+        const char = String.fromCharCode(i);
+        const g = font.layout(char).glyphs[0];
+        if (g.name === '.notdef')
+            continue;
+
+        const textBound = g.cbox;
+        if (bound.minX == null || textBound.minX < bound.minX) bound.minX = textBound.minX;
+        if (bound.maxX == null || textBound.maxX > bound.maxX) bound.maxX = textBound.maxX;
+        if (bound.minY == null || textBound.minY < bound.minY) bound.minY = textBound.minY;
+        if (bound.maxY == null || textBound.maxY > bound.maxY) bound.maxY = textBound.maxY;
+        inputText.push(char);
+    }
+    bound.width = bound.maxX - bound.minX;
+    bound.height = bound.maxY - bound.minY;
+    let scale = (toWordHeight * processScale) / bound.height;
+    console.log(`font scale: ${bound.width}x${bound.height}, gcd: ${gcd(bound.width, bound.height)}`);
+    const wordWidth = bound.width * scale;
+    const wordHight = (toWordHeight * processScale);
+    console.log(`process scale: ${scale} ${wordWidth}x${wordHight}`);
+    // console.log(bound);
+
+    const textImages = [];
+    for (const char of inputText) {
+        const g = font.layout(char).glyphs[0];
+        const textBound = g.cbox;
+        const h = textBound.height * scale;
+        const offY = (bound.height - (textBound.minY - bound.minY + textBound.height)) * scale / processScale;
+        console.log(textBound.width * scale / processScale)
+        const textImg = Sharp({
+            text: {
+                text: '<span color="#FFF">' + textEscape(char) + '</span>',
+                font: fontName,
+                fontfile: fontPath,
+                rgba: true,
+                spacing: 0,
+                width: wordWidth,
+                height: h
+            }
+        }).resize({ height: h / processScale, kernel: 'nearest' });
+        const outPath = Path.join(cacheFolder, `${char}.png`);
+        const out = await textImg.toFile(outPath);
+        textImages.push({ src: outPath, offsetY: offY });
+    }
+    const out = await (await JoinImages(textImages, { direction: 'horizontal', offset: 1 })).toFile('text_rgba.png');
+    console.log(out);
+
+    // const text = Sharp({
+    //     text: {
+    //         text: '<span letter_spacing="-' + (1024 * processScale) + '" color="#FFF">' + inputText.map(textEscape).join('') + '</span>',
+    //         font: fontName,
+    //         fontfile: fontPath,
+    //         rgba: true,
+    //         spacing: 0,
+    //         // width: wordWidth,
+    //         // height: wordHight * inputText.length * 100
+    //         width: wordWidth * inputText.length,
+    //         height: wordHight
+    //     }
+    // });
+    // await text.toFile('text_rgba.png');
+    // console.log(await text.metadata());
+
 })();
+
+function textEscape(char) {
+    const code = char.charCodeAt(0);
+    if (code > 31 && code < 127)
+        return '&#' + code.toString() + ';';
+    return char;
+}
+
+function gcd(a, b) {
+    if (!b)
+        return a;
+    return gcd(b, a % b);
+}
 
 async function createImageFromPath(imagePath, toWidth, addPadding, reverce, saveHexFile) {
     const sharpImg = Sharp(imagePath);

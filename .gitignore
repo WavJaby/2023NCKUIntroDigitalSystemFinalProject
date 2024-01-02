@@ -3,3 +3,4 @@ incremental_db/
 db/
 simulation/
 node_modules/
+cache/
